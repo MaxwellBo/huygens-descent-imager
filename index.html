@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Huygens DISR — descent onto Titan</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23c4682c'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <header id="top">
+    <div>
+      <p class="kicker">Descent Imager / Spectral Radiometer</p>
+      <h1>Huygens on Titan</h1>
+    </div>
+    <p class="deck">14 January 2005 · the DISR film, rebuilt as a 3D scene · 40× to touchdown, then 100×</p>
+  </header>
+
+  <div id="frame-probe" class="frame">
+    <span class="tag">Huygens</span>
+    <span class="tag bottom">1.75 m</span>
+  </div>
+  <div id="frame-traj" class="frame">
+    <span class="tag">From the south</span>
+    <span class="tag bottom">Everest 8.8 km · gold sun · blue Cassini</span>
+  </div>
+  <div id="frame-circle" class="frame round">
+    <div id="rose">
+      <span class="card n">N</span>
+      <span class="card e">E</span>
+      <span class="card s">S</span>
+      <span class="card w">W</span>
+      <i class="pip nadir"></i>
+      <i class="pip site" id="site-dot"></i>
+    </div>
+    <span class="tag">DISR hemisphere</span>
+  </div>
+  <div id="frame-surface" class="surface-row" hidden>
+    <div class="shot"><span>Moon, same scale</span></div>
+    <div class="shot"><span>Latest raw</span></div>
+    <div class="shot"><span>Processed</span></div>
+  </div>
+
+  <aside id="aside">
+    <p class="kicker">Universal time</p>
+    <div id="utc" class="clock">09:10:21</div>
+    <p id="date" class="quiet">14 January 2005</p>
+    <p class="kicker">Mission time</p>
+    <div id="met" class="met">0:00:00</div>
+    <ol id="events"></ol>
+    <dl id="telem"></dl>
+    <canvas id="compass" width="200" height="168"></canvas>
+    <p class="kicker">DISR exposures</p>
+    <div id="meters"></div>
+    <p class="kicker">Downward spectrum <span class="quiet">schematic</span></p>
+    <canvas id="spectrum" width="250" height="42"></canvas>
+    <p class="kicker">Signal at Cassini</p>
+    <canvas id="signal" width="250" height="36"></canvas>
+    <div id="spinrow">
+      <div>
+        <span id="turns">0.0</span> turns
+        <span id="spindir" class="quiet">from the sun</span>
+      </div>
+      <div class="bar"><i id="spinbar"></i></div>
+      <div id="spinrate" class="quiet">0 °/s</div>
+    </div>
+  </aside>
+
+  <div id="flyread" hidden>
+    <strong id="flymet">0:00:00</strong>
+    <span id="flyalt"></span>
+  </div>
+  <p id="ended" hidden>Loss of signal · Cassini is below the horizon</p>
+  <button id="sound" type="button">Click for the probe’s sound</button>
+  <p id="loading">Building the Titan mosaic…</p>
+
+  <footer id="transport">
+    <button id="play" type="button">Pause</button>
+    <input id="scrub" type="range" min="0" max="13203" step="0.1" value="0" aria-label="Mission time" />
+    <span id="rate" class="quiet">40×</span>
+    <button id="mode" type="button">Fly alongside</button>
+    <button id="mute" type="button">Mute</button>
+    <span class="quiet keys">Space play · C camera · M mute · arrows scrub</span>
+  </footer>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
