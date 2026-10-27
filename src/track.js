@@ -1,67 +1,60 @@
 import { LANDING_S, LINK_END_S, STRIDE, TRACK, T0_MS } from "./timeline.js";
-import { EVENTS, INSTRUMENTS, SUN_AZ } from "./instruments.js";
+import { EVENTS } from "./instruments.js";
 
-const STEP = 0.25;
-const N = Math.ceil(LINK_END_S / STEP) + 2;
-const yawTable = new Float32Array(N);
-const spinTable = new Float32Array(N);
-const turnsTable = new Float32Array(N);
+// DISR descent parameters: time, east m, north m, rotation count, sun azimuth deg.
+let ATT = null;
 
-// Positive spin is the designed counterclockwise sense, viewed from above.
-// Azimuth is clockwise from north, so counterclockwise spin decreases it.
-function spinCcwDeg(t) {
-  if (t >= LANDING_S) return 0;
-  const a = Math.sin(t * 0.017);
-  const b = Math.sin(t * 0.0051 + 1.3);
-  const c = Math.sin(t * 0.041);
-  if (t < 500) return 5.8 * Math.exp(-t / 280);
-  if (t < 900) {
-    const u = (t - 500) / 400;
-    return 1.0 * (1 - u) + -2.2 * u;
-  }
-  if (t < 3600) return -3.2 + 4.8 * a * b + 1.4 * c;
-  return -3.1 + 0.7 * Math.sin(t * 0.01);
+function yawFrom(rot, sunDeg) {
+  const frac = rot - Math.floor(rot);
+  return (((sunDeg + frac * 360) % 360) * Math.PI) / 180;
 }
 
-{
-  let az = SUN_AZ;
-  let turns = 0;
-  for (let i = 0; i < N; i++) {
-    const t = i * STEP;
-    const sp = spinCcwDeg(t);
-    spinTable[i] = sp;
-    yawTable[i] = az;
-    turnsTable[i] = turns;
-    const rad = (sp * Math.PI) / 180;
-    az -= rad * STEP;
-    turns += (Math.abs(rad) * STEP) / (2 * Math.PI);
+export function applyAttitude(rows) {
+  ATT = rows;
+  const n = TRACK.length / STRIDE;
+  for (let i = 0; i < n; i++) {
+    const t = TRACK[i * STRIDE];
+    const a = attitudeAt(Math.min(t, LANDING_S));
+    const b = attitudeAt(Math.min(t + 2, LANDING_S));
+    TRACK[i * STRIDE + 3] = a.east / 1000;
+    TRACK[i * STRIDE + 4] = a.north / 1000;
+    TRACK[i * STRIDE + 10] = t >= LANDING_S ? 0 : (b.east - a.east) / 2;
   }
+}
+
+function attitudeAt(t) {
+  const rows = ATT;
+  const last = rows.length - 1;
+  let lo = 0;
+  let hi = last;
+  if (t <= rows[0][0]) hi = 1;
+  else if (t >= rows[last][0]) lo = last - 1;
+  else {
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (rows[mid][0] <= t) lo = mid;
+      else hi = mid;
+    }
+  }
+  const a = rows[lo];
+  const b = rows[hi];
+  const f = a === b ? 0 : (t - a[0]) / (b[0] - a[0]);
+  const rot = a[3] + (b[3] - a[3]) * f;
+  const sun = a[4] + (b[4] - a[4]) * f;
+  const dt = Math.max(0.5, b[0] - a[0]);
+  return {
+    east: a[1] + (b[1] - a[1]) * f,
+    north: a[2] + (b[2] - a[2]) * f,
+    rot,
+    sun,
+    azimuth: yawFrom(rot, sun),
+    // Rotation count increases clockwise, so a falling count is counterclockwise.
+    spin: (-(b[3] - a[3]) / dt) * 360,
+  };
 }
 
 function lerp(a, b, u) {
   return a + (b - a) * u;
-}
-
-function bracket(table, t) {
-  const max = table.length - 1;
-  const x = Math.max(0, Math.min(max, t / STEP));
-  const i = Math.min(max - 1, Math.floor(x));
-  return [i, x - i];
-}
-
-export function yawAt(t) {
-  const [i, f] = bracket(yawTable, t);
-  return lerp(yawTable[i], yawTable[i + 1], f);
-}
-
-export function spinAt(t) {
-  const [i, f] = bracket(spinTable, t);
-  return lerp(spinTable[i], spinTable[i + 1], f);
-}
-
-export function turnsAt(t) {
-  const [i, f] = bracket(turnsTable, t);
-  return lerp(turnsTable[i], turnsTable[i + 1], f);
 }
 
 function unpack(index) {
@@ -131,57 +124,34 @@ export function stateAt(t) {
     tilty = lerp(tilty, -4, u);
   }
   const landed = t >= LANDING_S;
+  const pose = attitudeAt(Math.min(t, LANDING_S));
   return {
     t,
     landed,
     alt: landed ? 0 : s.altKm * 1000,
     altKm: landed ? 0 : s.altKm,
     vz: landed ? 0 : s.vz,
-    east: landed ? 0 : s.eastKm * 1000,
-    north: landed ? 0 : s.northKm * 1000,
-    eastKm: landed ? 0 : s.eastKm,
-    northKm: landed ? 0 : s.northKm,
+    east: landed ? 0 : pose.east,
+    north: landed ? 0 : pose.north,
+    eastKm: landed ? 0 : pose.east / 1000,
+    northKm: landed ? 0 : pose.north / 1000,
     tiltx,
     tilty,
     temp: landed ? 93.7 : s.temp,
     pressure: landed ? 146700 : s.pressure,
     agc: s.agc,
     wind: landed ? 0 : s.wind,
-    azimuth: yawAt(t),
-    spin: spinAt(t),
-    turns: turnsAt(t),
+    azimuth: pose.azimuth,
+    spin: landed ? 0 : pose.spin,
+    turns: pose.rot,
+    sunAz: (pose.sun * Math.PI) / 180,
     elev: cassiniElevation(t),
-    lamp: t >= 8745,
+    lamp: t >= 8734,
     stab: t >= 900,
     shieldOn: t < 32,
     coverOn: t < 66,
     booms: t >= 62,
   };
-}
-
-const PATTERN = [0, 1, 2, 0, 1, 4, 3, 0, 2, 5, 6, 8, 1, 0, 7, 9, 4, 2, 10, 0, 1, 11, 6, 0, 2, 1, 4];
-
-export function buildExposures() {
-  const list = [];
-  let t = 70;
-  let i = 0;
-  while (t < LINK_END_S && list.length < 3500) {
-    let inst = PATTERN[i % PATTERN.length];
-    if (t > 8745 && i % 11 === 0) inst = 12;
-    if (t < 8745 && inst === 12) inst = 0;
-    const s = stateAt(t);
-    list.push({
-      t,
-      inst,
-      yaw: s.azimuth,
-      x: s.east,
-      z: s.north,
-      alt: Math.max(1, s.alt),
-    });
-    t += t < LANDING_S ? 2.9 : 9.4;
-    i++;
-  }
-  return list;
 }
 
 export function signalAt(t) {
@@ -211,4 +181,4 @@ export function eventsUpTo(t) {
   return EVENTS.filter((e) => e.t <= t + 0.001);
 }
 
-export { INSTRUMENTS, LANDING_S, LINK_END_S, SUN_AZ };
+export { LANDING_S, LINK_END_S };

@@ -1,4 +1,3 @@
-import { SUN_AZ } from "./instruments.js";
 import { signalAt } from "./track.js";
 
 export function layout(w, h, mode) {
@@ -79,7 +78,7 @@ export function drawCompass(ctx, w, h, state) {
     ctx.lineTo(b[0], b[1]);
     ctx.stroke();
   }
-  const sun = polar(cx, cy, SUN_AZ, r - 2);
+  const sun = polar(cx, cy, state.sunAz, r - 2);
   ctx.fillStyle = "#ffb020";
   ctx.beginPath();
   ctx.arc(sun[0], sun[1], 4, 0, Math.PI * 2);
@@ -105,28 +104,52 @@ export function drawCompass(ctx, w, h, state) {
   ctx.fill();
 }
 
-export function drawSpectrum(ctx, w, h, state) {
+function rowAt(times, rows, t) {
+  if (!times.length || t < times[0]) return null;
+  let lo = 0;
+  let hi = times.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (times[mid] <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return rows[lo];
+}
+
+export function drawSpectrum(ctx, w, h, spec, t) {
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = "#120e0c";
   ctx.fillRect(0, 0, w, h);
-  const depth = Math.max(0, Math.min(1, (90 - state.altKm) / 90));
-  const bands = [0.18, 0.31, 0.46, 0.57, 0.69, 0.84];
-  for (let x = 0; x < w; x++) {
-    const u = x / w;
-    let bright = 0.78 - u * 0.18;
-    for (const b of bands) {
-      const d = u - b;
-      bright -= depth * 0.62 * Math.exp(-(d * d) / 0.00055);
+  if (!spec) return;
+  const vis = rowAt(spec.visTime, spec.vis, t);
+  const ir = rowAt(spec.irTime, spec.ir, t);
+  const pts = [];
+  if (vis) {
+    for (let i = 0; i < spec.visWave.length; i++) {
+      if (spec.visWave[i] < 900) pts.push([spec.visWave[i], vis[i]]);
     }
-    if (state.lamp) bright = Math.min(0.92, bright + 0.22);
-    bright = Math.max(0.05, bright);
-    const y = h - 3 - bright * (h - 8);
-    ctx.strokeStyle = `hsl(${24 + u * 18}, 75%, ${28 + bright * 38}%)`;
-    ctx.beginPath();
-    ctx.moveTo(x + 0.5, h - 2);
-    ctx.lineTo(x + 0.5, y);
-    ctx.stroke();
   }
+  if (ir) {
+    for (let i = 0; i < spec.irWave.length; i++) {
+      if (spec.irWave[i] >= 900) pts.push([spec.irWave[i], ir[i]]);
+    }
+  }
+  if (pts.length < 2) return;
+  pts.sort((a, b) => a[0] - b[0]);
+  let peak = 1e-6;
+  for (const p of pts) peak = Math.max(peak, p[1]);
+  const w0 = pts[0][0];
+  const w1 = pts[pts.length - 1][0];
+  ctx.beginPath();
+  ctx.strokeStyle = "#ffb15a";
+  ctx.lineWidth = 1.25;
+  for (let i = 0; i < pts.length; i++) {
+    const x = 2 + ((pts[i][0] - w0) / (w1 - w0)) * (w - 4);
+    const y = h - 3 - (pts[i][1] / peak) * (h - 8);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
 }
 
 export function drawSignal(ctx, w, h, t) {

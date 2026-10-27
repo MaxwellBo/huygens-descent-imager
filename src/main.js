@@ -3,11 +3,11 @@ import { createAudio } from "./audio.js";
 import { drawCompass, drawSignal, drawSpectrum, layout, place, surfaceBoxes } from "./hud.js";
 import { EVENTS, INSTRUMENTS } from "./instruments.js";
 import { createProbe, createShield } from "./probe.js";
-import { createSurface } from "./surface.js";
+import { createSurface, fitPhoto } from "./surface.js";
 import { createMaps, createWorld, MAX_ANGLE, paintExposure } from "./terrain.js";
 import { createTrajectory } from "./trajectory.js";
 import {
-  buildExposures,
+  applyAttitude,
   eventsUpTo,
   formatMission,
   formatUTC,
@@ -30,7 +30,10 @@ let playing = params.get("pause") !== "1" && !reduceMotion;
 let mode = "film";
 let scrubbing = false;
 
-const maps = createMaps();
+const archive = await fetch("./data/archive.json").then((response) => response.json());
+applyAttitude(archive.attitude);
+const spectrum = archive.spectrum;
+const maps = await createMaps();
 const world = createWorld(maps);
 const worldProbe = createProbe();
 const insetProbe = createProbe({ scaleFigure: true });
@@ -52,8 +55,8 @@ insetCam.position.set(7.2, 5.4, 15.6);
 insetCam.lookAt(0.55, 4.6, 0);
 
 const trajectory = createTrajectory();
-const surface = createSurface();
-const exposures = buildExposures();
+const surface = await createSurface(archive.raw);
+const exposures = archive.exposures.map(([t, inst, yaw, x, z, alt]) => ({ t, inst, yaw, x, z, alt }));
 
 const chase = new THREE.PerspectiveCamera(42, 1, 0.12, 1800000);
 let orbitAz = 0.9;
@@ -138,7 +141,7 @@ const ui = {
 const telemRows = [
   ["Altitude", "alt"],
   ["Descent", "vz"],
-  ["Wind, model", "wind"],
+  ["East wind", "wind"],
   ["Pressure", "p"],
   ["Temperature", "temp"],
   ["Tilt", "tilt"],
@@ -404,13 +407,13 @@ function syncDom(state) {
   const dir = state.spin > 0.25 ? "CCW" : state.spin < -0.25 ? "CW" : "still";
   ui.spindir.textContent = dir;
   ui.spinrate.textContent = `${state.spin.toFixed(1)} °/s`;
-  ui.spinbar.style.width = `${Math.min(100, (Math.abs(state.spin) / 8) * 100)}%`;
+  ui.spinbar.style.width = `${Math.min(100, (Math.abs(state.spin) / 40) * 100)}%`;
 
   const compass = document.querySelector("#compass");
-  const spectrum = document.querySelector("#spectrum");
+  const spectrumCanvas = document.querySelector("#spectrum");
   const signal = document.querySelector("#signal");
   const cFit = fitted.get(compass);
-  const sFit = fitted.get(spectrum);
+  const sFit = fitted.get(spectrumCanvas);
   const gFit = fitted.get(signal);
   if (cFit) {
     const ctx = compass.getContext("2d");
@@ -418,9 +421,9 @@ function syncDom(state) {
     drawCompass(ctx, cFit.w, cFit.h, state);
   }
   if (sFit) {
-    const ctx = spectrum.getContext("2d");
+    const ctx = spectrumCanvas.getContext("2d");
     ctx.setTransform(sFit.dpr, 0, 0, sFit.dpr, 0, 0);
-    drawSpectrum(ctx, sFit.w, sFit.h, state);
+    drawSpectrum(ctx, sFit.w, sFit.h, spectrum, state.t);
   }
   if (gFit) {
     const ctx = signal.getContext("2d");
@@ -469,7 +472,9 @@ function frame(now) {
   worldProbe.root.visible = false;
   shield.mesh.visible = false;
   world.cube.position.set(state.east, Math.max(state.alt, 4), state.north);
+  world.groundMat.uniforms.uMap.value = 1;
   if (!state.landed) world.cube.update(renderer, world.scene);
+  world.groundMat.uniforms.uMap.value = 0;
   worldProbe.root.visible = probeWas;
   shield.mesh.visible = shieldWas;
 
@@ -479,21 +484,18 @@ function frame(now) {
   renderer.setRenderTarget(null);
   renderer.setViewport(0, 0, viewW, viewH);
   if (state.landed) {
-    surface.setExposure(state.t);
-    for (const view of [surface.moon, surface.raw, surface.processed]) {
-      view.camera.aspect = 1;
-      view.camera.updateProjectionMatrix();
-    }
+    surface.setTime(state.t);
+    fitPhoto(surface.moon, 1);
+    fitPhoto(surface.processed, 1);
+    fitPhoto(surface.raw, 1, false, "top");
     renderPass(moonRT, surface.moon.scene, surface.moon.camera, 0x111111);
-    renderPass(rawRT, surface.raw.scene, surface.raw.camera, 0x4a2e22);
-    renderPass(procRT, surface.processed.scene, surface.processed.camera, 0x9a5a30);
-    const cam = surface.processed.camera;
-    cam.aspect = window.innerWidth / window.innerHeight;
-    cam.updateProjectionMatrix();
+    renderPass(rawRT, surface.raw.scene, surface.raw.camera, 0x1a100c);
+    renderPass(procRT, surface.processed.scene, surface.processed.camera, 0x1a100c);
+    fitPhoto(surface.processed, window.innerWidth / window.innerHeight, true);
     renderer.setRenderTarget(null);
     renderer.setViewport(0, 0, viewW, viewH);
     renderer.setClearColor(0x9a5a30, 1);
-    renderer.render(surface.processed.scene, cam);
+    renderer.render(surface.processed.scene, surface.processed.camera);
   } else {
     renderer.setClearColor(0xc4682c, 1);
     renderer.render(world.scene, chase);
@@ -512,7 +514,7 @@ function frame(now) {
   syncDom(state);
   window.__ready = true;
   } catch (error) {
-    console.error(error);
+    console.error(error && error.stack ? error.stack : error);
   }
   requestAnimationFrame(frame);
 }
